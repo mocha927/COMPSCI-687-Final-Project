@@ -220,10 +220,10 @@ def train(agent, env, num_episodes=1000):
 
         # Save model periodically
         if episode % 100 == 99:
-            torch.save(agent.policy_net.state_dict(), f"{SAVE_DIR}/pong_dqn_episode_{episode}.pth")
+            torch.save(agent.policy_net.state_dict(), f"{SAVE_DIR}/pong_ddqn_episode_{episode}.pth")
 
         if episode == num_episodes - 1:
-            torch.save(agent.policy_net.state_dict(), f"{SAVE_DIR}/pong_dqn_episode_end.pth")
+            torch.save(agent.policy_net.state_dict(), f"{SAVE_DIR}/pong_ddqn_episode_end.pth")
 
     return agent, losses
 
@@ -271,8 +271,8 @@ n_actions = env.action_space.n # for Pong
 agent = DDQNAgent(state_shape, n_actions, device)
 
 # load the model
-if os.path.exists("pong_dqn_episode_end.pth"):
-    agent.policy_net.load_state_dict(torch.load("pong_dqn_episode_end.pth"))
+if os.path.exists("pong_ddqn_episode_end.pth"):
+    agent.policy_net.load_state_dict(torch.load("pong_ddqn_episode_end.pth"))
     losses = np.load("losses.npy")
 else:
     agent, losses = train(agent, env, num_episodes=1000)

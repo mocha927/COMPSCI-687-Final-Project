@@ -32,7 +32,7 @@ device = torch.device(
 
 device
 
-SAVE_DIR = './model_weights/DDQN'
+SAVE_DIR = './model_weights/DDQN/pong'
 
 if not os.path.exists(SAVE_DIR):
     os.mkdir(SAVE_DIR)
@@ -271,12 +271,12 @@ n_actions = env.action_space.n # for Pong
 agent = DDQNAgent(state_shape, n_actions, device)
 
 # load the model
-if os.path.exists("pong_ddqn_episode_end.pth"):
-    agent.policy_net.load_state_dict(torch.load("pong_ddqn_episode_end.pth"))
-    losses = np.load("losses.npy")
+if os.path.exists(f"{SAVE_DIR}/pong_ddqn_episode_end.pth"):
+    agent.policy_net.load_state_dict(torch.load(f"{SAVE_DIR}/pong_ddqn_episode_end.pth", map_location=device))
+    losses = np.load(f"{SAVE_DIR}/losses.npy")
 else:
     agent, losses = train(agent, env, num_episodes=1000)
-    np.save(SAVE_DIR + "/" + "losses.npy", np.array(losses))
+    np.save(f"{SAVE_DIR}/losses.npy", np.array(losses))
 
 def play_game(agent, env):
     frame_stack = deque(maxlen=4)

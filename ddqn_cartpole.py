@@ -182,7 +182,7 @@ def play_game(agent, env, episodes=1):
     return rewards
 
 def train(agent, env, num_episodes=1000):
-    # os.makedirs("./model_weights/DQN/cartpole", exist_ok=True)
+    os.makedirs("./model_weights/DDQN/cartpole", exist_ok=True)
     rewards = []
     curr_policy_rewards = []
     for episode in range(num_episodes):
@@ -211,9 +211,9 @@ def train(agent, env, num_episodes=1000):
         rewards.append(total_reward)
 
         if episode % 100 == 99:
-            torch.save(agent.policy_net.state_dict(), f"./model_weights/DQN/cartpole/cartpole_dqn_episode_{episode}.pth")
+            torch.save(agent.policy_net.state_dict(), f"./model_weights/DDQN/cartpole/cartpole_ddqn_episode_{episode}.pth")
 
-    torch.save(agent.policy_net.state_dict(), "./model_weights/DQN/cartpole/cartpole_dqn_episode_end.pth")
+    torch.save(agent.policy_net.state_dict(), "./model_weights/DDQN/cartpole/cartpole_ddqn_episode_end.pth")
     return agent, rewards, curr_policy_rewards
 
 state_dim = env.observation_space.shape[0]
@@ -221,10 +221,10 @@ n_actions = env.action_space.n
 
 agent = DDQNAgent(state_dim, n_actions, device)
 
-weights_dir = "./model_weights/DQN/cartpole"
+weights_dir = "./model_weights/DDQN/cartpole"
 eps_policy_rewards_path = os.path.join(weights_dir, "curr_policy_rewards.npy")
 eval_policy_rewards_path =os.path.join(weights_dir, "eval_policy_rewards.npy")
-final_weights_path = os.path.join(weights_dir, "cartpole_dqn_episode_end.pth")
+final_weights_path = os.path.join(weights_dir, "cartpole_ddqn_episode_end.pth")
 os.makedirs(weights_dir, exist_ok=True)
 
 num_episodes = 4000
@@ -252,6 +252,6 @@ plt.xlabel("Episode")
 plt.ylabel("Eval Reward")
 plt.title("CartPole DDQN Training Progress (Eval Rewards)")
 plt.legend()
-os.makedirs("./images/DQN", exist_ok=True)
-plt.savefig("./images/DQN/DQN_cartpole_eval_reward.pdf", bbox_inches="tight", format="pdf")
+os.makedirs("./images/DDQN", exist_ok=True)
+plt.savefig("./images/DDQN/DDQN_cartpole_eval_reward.pdf", bbox_inches="tight", format="pdf")
 plt.show()

@@ -32,7 +32,10 @@ device = torch.device(
 
 device
 
-SAVE_DIR = '.'
+SAVE_DIR = './model_weights/DDQN'
+
+if not os.path.exists(SAVE_DIR):
+    os.mkdir(SAVE_DIR)
 
 class DQN(nn.Module):
     def __init__(self, input_shape, n_actions):

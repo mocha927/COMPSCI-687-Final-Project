@@ -27,7 +27,6 @@ device = torch.device(
     "cpu"
  )
 
-device
 
 class DQN(nn.Module):
     def __init__(self, n_observations, n_actions):
@@ -222,21 +221,19 @@ n_actions = env.action_space.n
 agent = DDQNAgent(state_dim, n_actions, device)
 
 weights_dir = "./model_weights/DDQN/cartpole"
-eps_policy_rewards_path = os.path.join(weights_dir, "curr_policy_rewards.npy")
 eval_policy_rewards_path =os.path.join(weights_dir, "eval_policy_rewards.npy")
 final_weights_path = os.path.join(weights_dir, "cartpole_ddqn_episode_end.pth")
 os.makedirs(weights_dir, exist_ok=True)
 
 num_episodes = 4000
 
-if os.path.exists(final_weights_path) and os.path.exists(eps_policy_rewards_path):
+if os.path.exists(final_weights_path) and os.path.exists(eval_policy_rewards_path):
     agent.policy_net.load_state_dict(torch.load(final_weights_path, map_location=device))
     agent.target_net.load_state_dict(agent.policy_net.state_dict())
-    curr_policy_rewards = np.load(eps_policy_rewards_path)
+    curr_policy_rewards = np.load(eval_policy_rewards_path)
     eval_rewards = np.load(eval_policy_rewards_path)
 else:
-    agent, curr_policy_rewards, eval_rewards = train(agent, env, num_episodes=num_episodes)
-    np.save(eps_policy_rewards_path, np.array(curr_policy_rewards))
+    agent, _, eval_rewards = train(agent, env, num_episodes=num_episodes)
     np.save(eval_policy_rewards_path, np.array(eval_rewards))
 
 window = 50

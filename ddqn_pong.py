@@ -30,8 +30,6 @@ device = torch.device(
     "cpu"
 )
 
-device
-
 SAVE_DIR = './model_weights/DDQN/pong'
 
 if not os.path.exists(SAVE_DIR):

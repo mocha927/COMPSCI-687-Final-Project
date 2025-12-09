@@ -27,6 +27,7 @@ device = torch.device(
     "cpu"
  )
 
+device
 
 class DQN(nn.Module):
     def __init__(self, n_observations, n_actions):
@@ -58,7 +59,7 @@ class ReplayBuffer:
     def __len__(self):
         return len(self.buffer)
 
-class DQNAgent:
+class DDQNAgent:
     def __init__(self, state_dim, n_actions, device="cpu"):
         self.device = device
         self.n_actions = n_actions
@@ -100,7 +101,7 @@ class DQNAgent:
 
     def optimize_model(self):
         if len(self.memory) < self.batch_size:
-            return None
+            return
 
         state_batch, action_batch, reward_batch, next_state_batch, done_batch = self.memory.sample(self.batch_size)
 
@@ -113,8 +114,16 @@ class DQNAgent:
         current_q_values = self.policy_net(state_batch).gather(1, action_batch.unsqueeze(1))
 
         with torch.no_grad():
-            next_state_values = self.target_net(next_state_batch).max(1)[0]
-            next_state_values = next_state_values.masked_fill(done_batch, 0.0)
+            # get indices of best action taken by policy network at next state(s)
+            next_action_indices = self.policy_net(next_state_batch).max(1)[1]
+
+            # compute q values for target network
+            next_state_values = self.target_net(next_state_batch)
+
+            # uses indices from policy network to corresponding q values estimated from target network
+            next_state_values = next_state_values.gather(1, next_action_indices.unsqueeze(1)).squeeze()
+
+            next_state_values[done_batch] = 0.0
             expected_q_values = reward_batch + self.gamma * next_state_values
 
         loss = nn.SmoothL1Loss()(current_q_values.squeeze(), expected_q_values)
@@ -125,44 +134,6 @@ class DQNAgent:
         self.optimizer.step()
 
         return loss.item()
-
-class DDQNAgent(DQNAgent):
-  # override previous 'optimize_model' method
-  def optimize_model(self):
-      if len(self.memory) < self.batch_size:
-          return
-
-      state_batch, action_batch, reward_batch, next_state_batch, done_batch = self.memory.sample(self.batch_size)
-
-      state_batch = state_batch.to(self.device)
-      action_batch = action_batch.to(self.device)
-      reward_batch = reward_batch.to(self.device)
-      next_state_batch = next_state_batch.to(self.device)
-      done_batch = done_batch.to(self.device)
-
-      current_q_values = self.policy_net(state_batch).gather(1, action_batch.unsqueeze(1))
-
-      with torch.no_grad():
-          # get indices of best action taken by policy network at next state(s)
-          next_action_indices = self.policy_net(next_state_batch).max(1)[1]
-
-          # compute q values for target network
-          next_state_values = self.target_net(next_state_batch)
-
-          # uses indices from policy network to corresponding q values estimated from target network
-          next_state_values = next_state_values.gather(1, next_action_indices.unsqueeze(1)).squeeze()
-
-          next_state_values[done_batch] = 0.0
-          expected_q_values = reward_batch + self.gamma * next_state_values
-
-      loss = nn.SmoothL1Loss()(current_q_values.squeeze(), expected_q_values)
-
-      self.optimizer.zero_grad()
-      loss.backward()
-      torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 100)
-      self.optimizer.step()
-
-      return loss.item()
 
 def play_game(agent, env, episodes=1):
     rewards = []
@@ -213,6 +184,7 @@ def train(agent, env, num_episodes=1000):
             torch.save(agent.policy_net.state_dict(), f"./model_weights/DDQN/cartpole/cartpole_ddqn_episode_{episode}.pth")
 
     torch.save(agent.policy_net.state_dict(), "./model_weights/DDQN/cartpole/cartpole_ddqn_episode_end.pth")
+
     return agent, rewards, curr_policy_rewards
 
 state_dim = env.observation_space.shape[0]
@@ -221,18 +193,21 @@ n_actions = env.action_space.n
 agent = DDQNAgent(state_dim, n_actions, device)
 
 weights_dir = "./model_weights/DDQN/cartpole"
+eps_policy_rewards_path = os.path.join(weights_dir, "curr_policy_rewards.npy")
 eval_policy_rewards_path =os.path.join(weights_dir, "eval_policy_rewards.npy")
 final_weights_path = os.path.join(weights_dir, "cartpole_ddqn_episode_end.pth")
 os.makedirs(weights_dir, exist_ok=True)
 
 num_episodes = 4000
 
-if os.path.exists(final_weights_path) and os.path.exists(eval_policy_rewards_path):
+if os.path.exists(final_weights_path) and os.path.exists(eps_policy_rewards_path):
     agent.policy_net.load_state_dict(torch.load(final_weights_path, map_location=device))
     agent.target_net.load_state_dict(agent.policy_net.state_dict())
+    curr_policy_rewards = np.load(eps_policy_rewards_path)
     eval_rewards = np.load(eval_policy_rewards_path)
 else:
-    agent, _, eval_rewards = train(agent, env, num_episodes=num_episodes)
+    agent, curr_policy_rewards, eval_rewards = train(agent, env, num_episodes=num_episodes)
+    np.save(eps_policy_rewards_path, np.array(curr_policy_rewards))
     np.save(eval_policy_rewards_path, np.array(eval_rewards))
 
 window = 50

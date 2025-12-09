@@ -30,10 +30,12 @@ device = torch.device(
     "cpu"
 )
 
-SAVE_DIR = './model_weights/DDQN/pong'
+device
+
+SAVE_DIR = './model_weights/DDQN'
 
 if not os.path.exists(SAVE_DIR):
-    os.mkdir(SAVE_DIR)
+    os.makedirs(SAVE_DIR)
 
 class DQN(nn.Module):
     def __init__(self, input_shape, n_actions):
@@ -96,7 +98,7 @@ class ReplayBuffer:
     def __len__(self):
         return len(self.buffer)
 
-class DQNAgent:
+class DDQNAgent:
     def __init__(self, state_shape, n_actions, device="cpu"):
         self.device = device
         self.n_actions = n_actions
@@ -225,56 +227,37 @@ def train(agent, env, num_episodes=1000):
 
     return agent, losses
 
-class DDQNAgent(DQNAgent):
-  # override previous 'optimize_model' method
-  def optimize_model(self):
-      if len(self.memory) < self.batch_size:
-          return
-
-      state_batch, action_batch, reward_batch, next_state_batch, done_batch = self.memory.sample(self.batch_size)
-
-      state_batch = state_batch.to(self.device)
-      action_batch = action_batch.to(self.device)
-      reward_batch = reward_batch.to(self.device)
-      next_state_batch = next_state_batch.to(self.device)
-      done_batch = done_batch.to(self.device)
-
-      current_q_values = self.policy_net(state_batch).gather(1, action_batch.unsqueeze(1))
-
-      with torch.no_grad():
-          # get indices of best action taken by policy network at next state(s)
-          next_action_indices = self.policy_net(next_state_batch).max(1)[1]
-
-          # compute q values for target network
-          next_state_values = self.target_net(next_state_batch)
-
-          # uses indices from policy network to corresponding q values estimated from target network
-          next_state_values = next_state_values.gather(1, next_action_indices.unsqueeze(1)).squeeze()
-
-          next_state_values[done_batch] = 0.0
-          expected_q_values = reward_batch + self.gamma * next_state_values
-
-      loss = nn.SmoothL1Loss()(current_q_values.squeeze(), expected_q_values)
-
-      self.optimizer.zero_grad()
-      loss.backward()
-      torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 100)
-      self.optimizer.step()
-
-      return loss.item()
-
 state_shape = (4, 80, 80)  # 4 frames stacked, 80x80 each; for Pong
 n_actions = env.action_space.n # for Pong
 
 agent = DDQNAgent(state_shape, n_actions, device)
 
 # load the model
-if os.path.exists(f"{SAVE_DIR}/pong_ddqn_episode_end.pth"):
-    agent.policy_net.load_state_dict(torch.load(f"{SAVE_DIR}/pong_ddqn_episode_end.pth", map_location=device))
-    losses = np.load(f"{SAVE_DIR}/losses.npy")
+if os.path.exists("pong_ddqn_episode_end.pth"):
+    agent.policy_net.load_state_dict(torch.load("pong_ddqn_episode_end.pth"))
+    losses = np.load("losses.npy")
 else:
     agent, losses = train(agent, env, num_episodes=1000)
-    np.save(f"{SAVE_DIR}/losses.npy", np.array(losses))
+    np.save(SAVE_DIR + "/" + "losses.npy", np.array(losses))
+
+eval_rewards = losses
+
+window = 20
+plt.figure(figsize=(10, 5))
+plt.plot(eval_rewards, label="Total Reward per Episode", alpha=0.4)
+
+if len(eval_rewards) >= window:
+    rolling_avg = np.convolve(eval_rewards, np.ones(window) / window, mode='valid')
+    rolling_x = np.arange(window - 1, len(eval_rewards))
+    plt.plot(rolling_x, rolling_avg, label=f"{window}-Episode Rolling Avg", color="red")
+
+plt.xlabel("Episode")
+plt.ylabel("Eval Reward")
+plt.title("Pong DDQN Training Progress (Eval Rewards)")
+plt.legend()
+os.makedirs("./images/DDQN", exist_ok=True)
+plt.savefig("./images/DDQN/DDQN_pong_eval_reward.pdf", bbox_inches="tight", format="pdf")
+plt.show()
 
 def play_game(agent, env):
     frame_stack = deque(maxlen=4)

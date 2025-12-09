@@ -95,7 +95,7 @@ class PPOBuffer:
 
 
 class PPOAgent:
-    def __init__(self, state_shape, n_actions, device="cpu", lr=3e-4, gamma=0.99, lam=0.95, eps=0.2, minibatch_size=256, num_epochs=4, buffer_size=4096):
+    def __init__(self, state_shape, n_actions, device="cpu", lr=3e-4, gamma=0.99, lam=0.95, eps=0.2, minibatch_size=128, num_epochs=5, buffer_size=10000):
         self.device = device
         self.n_actions = n_actions
         self.state_shape = state_shape

@@ -178,7 +178,7 @@ def play_game(agent, env, episodes=1):
     return rewards
 
 
-def train(agent, env, num_episodes=10000, steps_per_epoch=2048, max_ep_len=500):
+def train(agent, env, num_episodes=10000):
     rewards = []
     eval_rewards = []
 
@@ -186,25 +186,24 @@ def train(agent, env, num_episodes=10000, steps_per_epoch=2048, max_ep_len=500):
         total_steps = 0
         ep_rewards = []
 
-        while total_steps < steps_per_epoch:
-            state, _ = env.reset()
-            done = False
-            truncated = False
-            total_reward = 0.0
-            ep_len = 0
+        state, _ = env.reset()
+        done = False
+        truncated = False
+        total_reward = 0.0
+        ep_len = 0
 
-            while not (done or truncated) and ep_len < max_ep_len and total_steps < steps_per_epoch:
-                action, log_prob, value = agent.select_action(state)
-                next_state, reward, done, truncated, _ = env.step(action)
+        while not (done or truncated):
+            action, log_prob, value = agent.select_action(state)
+            next_state, reward, done, truncated, _ = env.step(action)
 
-                agent.buffer.store(state, action, log_prob, reward, done or truncated, value)
+            agent.buffer.store(state, action, log_prob, reward, done or truncated, value)
 
-                state = next_state
-                total_reward += reward
-                ep_len += 1
-                total_steps += 1
+            state = next_state
+            total_reward += reward
+            ep_len += 1
+            total_steps += 1
 
-            ep_rewards.append(total_reward)
+        ep_rewards.append(total_reward)
 
         if not (done or truncated):
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(agent.device)
@@ -218,6 +217,7 @@ def train(agent, env, num_episodes=10000, steps_per_epoch=2048, max_ep_len=500):
         avg_ep_reward = np.mean(ep_rewards)
         rewards.append(avg_ep_reward)
 
+        env.reset()
         eval_rewards.append(play_game(agent, env, episodes=1)[0])
 
         print(

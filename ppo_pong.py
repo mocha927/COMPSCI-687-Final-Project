@@ -178,7 +178,7 @@ def preprocess_frame(frame):
     frame = frame.astype(np.float32) / 255.0
     return frame
 
-def train(agent, env, num_episodes=1000, steps_per_epoch=4096, max_ep_len=10000):
+def train(agent, env, num_episodes=5000, steps_per_epoch=4096, max_ep_len=10000):
     frame_stack = deque(maxlen=4)
     total_rewards = []
     losses = []

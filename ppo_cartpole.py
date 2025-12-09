@@ -205,12 +205,9 @@ def train(agent, env, num_episodes=10000):
 
         ep_rewards.append(total_reward)
 
-        if not (done or truncated):
-            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(agent.device)
-            logits, last_value = agent.policy(state_tensor)
-            last_value = last_value.item()
-        else:
-            last_value = 0.0
+        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(agent.device)
+        logits, last_value = agent.policy(state_tensor)
+        last_value = last_value.item()
 
         loss = agent.update(last_value)
 

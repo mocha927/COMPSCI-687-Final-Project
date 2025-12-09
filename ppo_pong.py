@@ -178,7 +178,7 @@ def preprocess_frame(frame):
     frame = frame.astype(np.float32) / 255.0
     return frame
 
-def train(agent, env, num_episodes=1000, steps_per_epoch=4096, max_ep_len=10000):
+def train(agent, env, num_episodes=5000, steps_per_epoch=4096, max_ep_len=10000):
     frame_stack = deque(maxlen=4)
     total_rewards = []
     losses = []
@@ -263,7 +263,7 @@ if __name__ == "__main__":
     rewards = np.load(f"{MODEL_PATH}/rewards.npy")
     losses = np.load(f"{MODEL_PATH}/losses.npy")
   else:
-    rewards, losses = train(agent, env, num_episodes=1000)
+    rewards, losses = train(agent, env, num_episodes=5000)
     torch.save(agent.policy.state_dict(), f"{MODEL_PATH}/pong_ppo_episode_end.pth")
     np.save(f"{MODEL_PATH}/rewards.npy", np.array(rewards))
     np.save(f"{MODEL_PATH}/losses.npy", np.array(losses))

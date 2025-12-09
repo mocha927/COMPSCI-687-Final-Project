@@ -218,13 +218,12 @@ def train(agent, env, num_episodes=10000, steps_per_epoch=2048, max_ep_len=500):
         avg_ep_reward = np.mean(ep_rewards)
         rewards.append(avg_ep_reward)
 
-        eval_reward = play_game(agent, env, episodes=1)[0]
-        eval_rewards.append(eval_reward)
+        eval_rewards.append(play_game(agent, env, episodes=1)[0])
 
         print(
             f"Episode {episode} | "
             f"Train Avg Return: {avg_ep_reward} | "
-            f"Eval Return: {eval_reward} | "
+            f"Eval Return: {eval_rewards[-1]} | "
             f"Loss: {loss}"
         )
 
@@ -239,7 +238,7 @@ if __name__ == "__main__":
         "cpu"
     )
 
-    seed = 0
+    seed = 42
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -259,19 +258,17 @@ if __name__ == "__main__":
     eval_policy_rewards_path = os.path.join(MODEL_PATH, "eval_rewards.npy")
     final_weights_path = os.path.join(MODEL_PATH, "cartpole_ppo_final.pth")
 
-    num_episodes = 500
+    num_episodes = 1000
 
     if os.path.exists(final_weights_path) and os.path.exists(eps_policy_rewards_path):
         agent.policy.load_state_dict(torch.load(final_weights_path, map_location=device))
-        train_rewards = np.load(eps_policy_rewards_path)
         eval_rewards = np.load(eval_policy_rewards_path)
     else:
-        agent, train_rewards, eval_rewards = train(agent, env, num_episodes=num_episodes)
+        agent, _, eval_rewards = train(agent, env, num_episodes=num_episodes)
         torch.save(agent.policy.state_dict(), final_weights_path)
-        np.save(eps_policy_rewards_path, np.array(train_rewards))
         np.save(eval_policy_rewards_path, np.array(eval_rewards))
 
-    window = 20
+    window = 50
     plt.figure(figsize=(10, 5))
     plt.plot(eval_rewards, label="Total Reward per Episode", alpha=0.4)
 

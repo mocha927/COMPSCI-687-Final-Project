@@ -259,7 +259,7 @@ if __name__ == "__main__":
     eval_policy_rewards_path = os.path.join(MODEL_PATH, "eval_rewards.npy")
     final_weights_path = os.path.join(MODEL_PATH, "cartpole_ppo_final.pth")
 
-    num_episodes = 200
+    num_episodes = 500
 
     if os.path.exists(final_weights_path) and os.path.exists(eps_policy_rewards_path):
         agent.policy.load_state_dict(torch.load(final_weights_path, map_location=device))

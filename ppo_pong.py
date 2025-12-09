@@ -69,12 +69,12 @@ class PPOBuffer:
         self.values = []
 
     def store(self, state, action, log_prob, reward, done, value):
-        self.states.append(state)
-        self.actions.append(action)
+        self.states.append(np.array(state, copy=False))
+        self.actions.append(int(action))
         self.log_probs.append(log_prob.detach().cpu())
-        self.rewards.append(reward)
-        self.dones.append(done)
-        self.values.append(value)
+        self.rewards.append(float(reward))
+        self.dones.append(float(done))
+        self.values.append(float(value))
 
     def get(self, last_value=0.0):
         values = self.values + [last_value]
@@ -95,7 +95,7 @@ class PPOBuffer:
 
 
 class PPOAgent:
-    def __init__(self, state_shape, n_actions, device="cpu", lr=1e-4, gamma=0.99, lam=0.95, eps=0.2, minibatch_size=32, num_epochs=4, buffer_size=4096):
+    def __init__(self, state_shape, n_actions, device="cpu", lr=3e-4, gamma=0.99, lam=0.95, eps=0.2, minibatch_size=256, num_epochs=4, buffer_size=4096):
         self.device = device
         self.n_actions = n_actions
         self.state_shape = state_shape
@@ -112,10 +112,11 @@ class PPOAgent:
 
     def select_action(self, state):
         state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-        logits, value = self.policy(state)
-        m = Categorical(logits=logits)
-        action = m.sample()
-        log_prob = m.log_prob(action)
+        with torch.no_grad():
+            logits, value = self.policy(state)
+            m = Categorical(logits=logits)
+            action = m.sample()
+            log_prob = m.log_prob(action)
         
         return action.item(), log_prob, value.item()
         
@@ -178,60 +179,65 @@ def preprocess_frame(frame):
     frame = frame.astype(np.float32) / 255.0
     return frame
 
-def train(agent, env, num_episodes=5000, steps_per_epoch=4096, max_ep_len=10000):
+def train(agent, env, num_episodes=1000, steps_per_epoch=16384, max_ep_len=10000):
     frame_stack = deque(maxlen=4)
-    total_rewards = []
+    rewards = []
     losses = []
     total_steps = 0    
 
     for episode in range(num_episodes):
-        frame, _ = env.reset()
-        frame = preprocess_frame(frame)
+        steps = 0
+        ep_rewards = []
+
+        while steps < steps_per_epoch:
+            frame, _ = env.reset()
+            frame = preprocess_frame(frame)
+            
+            frame_stack.clear()
+            for _ in range(4):
+                frame_stack.append(frame)
         
-        for _ in range(4):
-            frame_stack.append(frame)
+            state = np.array(frame_stack)
+            ep_return = 0
+            ep_len = 0
+            done = False
+            truncated = False
         
-        state = np.array(frame_stack)
-        total_reward = 0
-
-        for t in range(max_ep_len):
-            action, log_prob, value = agent.select_action(state)
+            while not (done or truncated) and ep_len < max_ep_len and steps < steps_per_epoch:
+                action, log_prob, value = agent.select_action(state)
             
-            next_frame, reward, done, truncated, _ = env.step(action)
-            next_frame = preprocess_frame(next_frame)
-            frame_stack.append(next_frame)
-            next_state = np.array(frame_stack)
+                next_frame, reward, done, truncated, _ = env.step(action)
+                next_frame = preprocess_frame(next_frame)
+                frame_stack.append(next_frame)
+                next_state = np.array(frame_stack)
             
-            agent.buffer.store(state, action, log_prob, reward, float(done or truncated), value)
+                agent.buffer.store(state, action, log_prob, reward, float(done or truncated), value)
             
-            state = next_state
-            total_reward += reward
-            total_steps += 1
-
-            if done or truncated:
-                break
+                state = next_state
+                ep_return += reward
+                steps += 1
+                total_steps += 1
+                ep_len += 1
+              
+            ep_rewards.append(ep_return)
             
-            if len(agent.buffer.states) >= steps_per_epoch:
-                with torch.no_grad():
-                    state_tensor = torch.FloatTensor(state).unsqueeze(0).to(agent.device)
-                    logits, last_value = agent.policy(state_tensor)
-                    last_value = last_value.squeeze(0).item()
-                loss = agent.update(last_value)
-                losses.append(loss)
-                print(f"Update: total_steps={total_steps}, loss={loss}")
-
-        total_rewards.append(total_reward)
-        print(f"Episode {episode}, Total Reward: {total_reward}, Total Steps: {total_steps}")
-
-    if len(agent.buffer.states) > 0:
-        with torch.no_grad():
-            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(agent.device)
-            logits, last_value = agent.policy(state_tensor)
-            last_value = last_value.squeeze(0).item()
+        if not (done or truncated):
+            with torch.no_grad():
+                state_tensor = torch.FloatTensor(state).unsqueeze(0).to(agent.device)
+                logits, last_value = agent.policy(state_tensor)
+                last_value = last_value.squeeze(0).item()
+        else:
+            last_value = 0.0
+        
         loss = agent.update(last_value)
-        losses.append(loss)
+        losses.append(loss)         
+        print(f"Update: total_steps={total_steps}, loss={loss}")
+        
+        avg_ep_rewards = np.mean(ep_rewards)
+        rewards.append(avg_ep_rewards)
+        print(f"Episode {episode}, Total Reward: {avg_ep_rewards}, Total Steps: {total_steps}")
 
-    return total_rewards, losses
+    return rewards, losses
 
 
 if __name__ == "__main__":

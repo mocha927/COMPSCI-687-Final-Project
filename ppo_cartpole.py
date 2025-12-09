@@ -190,7 +190,6 @@ def train(agent, env, num_episodes=10000):
         done = False
         truncated = False
         total_reward = 0.0
-        ep_len = 0
 
         while not (done or truncated):
             action, log_prob, value = agent.select_action(state)
@@ -200,7 +199,6 @@ def train(agent, env, num_episodes=10000):
 
             state = next_state
             total_reward += reward
-            ep_len += 1
             total_steps += 1
 
         ep_rewards.append(total_reward)
@@ -251,13 +249,12 @@ if __name__ == "__main__":
     os.makedirs(MODEL_PATH, exist_ok=True)
     os.makedirs(PLOT_PATH, exist_ok=True)
 
-    eps_policy_rewards_path = os.path.join(MODEL_PATH, "train_rewards.npy")
     eval_policy_rewards_path = os.path.join(MODEL_PATH, "eval_rewards.npy")
     final_weights_path = os.path.join(MODEL_PATH, "cartpole_ppo_final.pth")
 
-    num_episodes = 1000
+    num_episodes = 10000
 
-    if os.path.exists(final_weights_path) and os.path.exists(eps_policy_rewards_path):
+    if os.path.exists(final_weights_path) and os.path.exists(eval_policy_rewards_path):
         agent.policy.load_state_dict(torch.load(final_weights_path, map_location=device))
         eval_rewards = np.load(eval_policy_rewards_path)
     else:

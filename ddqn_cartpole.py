@@ -230,7 +230,6 @@ num_episodes = 4000
 if os.path.exists(final_weights_path) and os.path.exists(eval_policy_rewards_path):
     agent.policy_net.load_state_dict(torch.load(final_weights_path, map_location=device))
     agent.target_net.load_state_dict(agent.policy_net.state_dict())
-    curr_policy_rewards = np.load(eval_policy_rewards_path)
     eval_rewards = np.load(eval_policy_rewards_path)
 else:
     agent, _, eval_rewards = train(agent, env, num_episodes=num_episodes)

@@ -242,7 +242,7 @@ if __name__ == "__main__":
     "cpu"
   )
 
-  seed = 0
+  seed = 42
   random.seed(seed)
   np.random.seed(seed)
   torch.manual_seed(seed)
@@ -263,7 +263,7 @@ if __name__ == "__main__":
     rewards = np.load(f"{MODEL_PATH}/rewards.npy")
     losses = np.load(f"{MODEL_PATH}/losses.npy")
   else:
-    rewards, losses = train(agent, env, num_episodes=1000)
+    rewards, losses = train(agent, env, num_episodes=5000)
     torch.save(agent.policy.state_dict(), f"{MODEL_PATH}/pong_ppo_episode_end.pth")
     np.save(f"{MODEL_PATH}/rewards.npy", np.array(rewards))
     np.save(f"{MODEL_PATH}/losses.npy", np.array(losses))

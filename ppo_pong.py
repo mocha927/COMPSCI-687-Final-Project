@@ -1,47 +1,49 @@
-import gymnasium as gym
-import random
-import matplotlib.pyplot as plt
-from collections import deque
-import ale_py
 import os
+import random
+from collections import deque
 
+import gymnasium as gym
+import ale_py
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torch.nn.functional as F
+import torch.optim as optim
 from torch.distributions import Categorical
 
 
 class PPO(nn.Module):
-    def __init__(self, input_shape, n_actions):
+    def __init__(self, obs_dim, act_dim):
         super(PPO, self).__init__()
-        
-        self.conv = nn.Sequential(
-            nn.Conv2d(input_shape[0], 32, kernel_size=8, stride=4),
+
+        self.conv_stack = nn.Sequential(
+            nn.Conv2d(obs_dim[0], 32, kernel_size=8, stride=4),
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=4, stride=2),
             nn.ReLU(),
             nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            nn.ReLU()
+            nn.ReLU(),
+            nn.Flatten()
         )
-        
-        conv_out_size = self._get_conv_out(input_shape)
-        
+
+        conv_out_size = self._get_conv_out(obs_dim)
+
         self.fc = nn.Sequential(
             nn.Linear(conv_out_size, 512),
             nn.ReLU(),
         )
 
-        self.policy_head = nn.Linear(512, n_actions)
+        self.policy_head = nn.Linear(512, act_dim)
         self.value_head = nn.Linear(512, 1)
-        
+
     def _get_conv_out(self, shape):
-        o = self.conv(torch.zeros(1, *shape))
-        return int(np.prod(o.size()))
-    
+        with torch.no_grad():
+            output = self.conv_stack(torch.zeros(1, *shape))
+        return int(np.prod(output.size()))
+
     def forward(self, x):
-        x = self.conv(x).view(x.size()[0], -1)
+        x = self.conv_stack(x)
         x = self.fc(x)
         logits = self.policy_head(x)
         value = self.value_head(x).squeeze(-1)
@@ -53,73 +55,85 @@ class PPOBuffer:
         self.max_size = size
         self.gamma = gamma
         self.lam = lam
-        self.states = []
-        self.actions = []
-        self.log_probs = []
-        self.rewards = []
-        self.dones = []
-        self.values = []
-    
+        self.obs_buf = []
+        self.act_buf = []
+        self.log_prob_buf = []
+        self.ret_buf = []
+        self.don_buf = []
+        self.val_buf = []
+
+    def __len__(self):
+        return len(self.obs_buf)
+
     def reset(self):
-        self.states = []
-        self.actions = []
-        self.log_probs = []
-        self.rewards = []
-        self.dones = []
-        self.values = []
+        self.obs_buf = []
+        self.act_buf = []
+        self.log_prob_buf = []
+        self.ret_buf = []
+        self.don_buf = []
+        self.val_buf = []
 
     def store(self, state, action, log_prob, reward, done, value):
-        self.states.append(np.array(state, copy=False))
-        self.actions.append(int(action))
-        self.log_probs.append(log_prob.detach().cpu())
-        self.rewards.append(float(reward))
-        self.dones.append(float(done))
-        self.values.append(float(value))
+        if len(self.obs_buf) >= self.max_size:
+            raise RuntimeError("PPOBuffer Overflow: Increase buffer_size or call update more often")
+        
+        self.obs_buf.append(np.array(state, copy=False))
+        self.act_buf.append(int(action))
+        self.log_prob_buf.append(float(log_prob))
+        self.ret_buf.append(float(reward))
+        self.don_buf.append(float(done))
+        self.val_buf.append(float(value))
 
     def get(self, last_value=0.0):
-        values = self.values + [last_value]
+        values = self.val_buf + [float(last_value)]
         returns = []
         advantages = []
-        advantage = 0
-       
-        for i in range(len(self.states) - 1, -1, -1):
-            delta = self.rewards[i] + self.gamma * values[i + 1] * (1 - self.dones[i]) - values[i]
-            advantage = delta + self.gamma * self.lam * (1 - self.dones[i]) * advantage
-            advantages.insert(0, advantage)
-            returns.insert(0, advantage + self.values[i])
+        advantage = 0.0
 
-        advantages = torch.FloatTensor(np.float32(advantages))
+        for i in range(len(self.obs_buf) - 1, -1, -1):
+            delta = self.ret_buf[i] + self.gamma * values[i + 1] * (1.0 - self.don_buf[i]) - values[i]
+            advantage = delta + self.gamma * self.lam * (1.0 - self.don_buf[i]) * advantage
+            advantages.insert(0, advantage)
+            returns.insert(0, advantage + self.val_buf[i])
+
+        advantages = torch.tensor(advantages, dtype=torch.float32)
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-        return (torch.FloatTensor(np.float32(self.states)), torch.LongTensor(self.actions), torch.stack(self.log_probs), torch.FloatTensor(returns), advantages)       
+        states = torch.tensor(np.array(self.obs_buf, dtype=np.float32), dtype=torch.float32)
+        actions = torch.tensor(self.act_buf, dtype=torch.long)
+        log_probs = torch.tensor(self.log_prob_buf, dtype=torch.float32)
+        returns = torch.tensor(returns, dtype=torch.float32)
+
+        return states, actions, log_probs, returns, advantages
 
 
 class PPOAgent:
-    def __init__(self, state_shape, n_actions, device="cpu", lr=3e-4, gamma=0.99, lam=0.95, eps=0.2, minibatch_size=128, num_epochs=5, buffer_size=10000):
+    def __init__(self, obs_dim, act_dim, device="cpu", gamma=0.99, clip_ratio=0.1, lr=2.5e-4, lam=0.95, minibatch_size=256, epochs=4, buffer_size=8192):
         self.device = device
-        self.n_actions = n_actions
-        self.state_shape = state_shape
+        self.obs_dim = obs_dim
+        self.act_dim = act_dim
 
-        self.policy = PPO(state_shape, n_actions).to(device)
+        self.policy = PPO(obs_dim, act_dim).to(device)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
 
         self.buffer = PPOBuffer(buffer_size, gamma, lam)
         self.gamma = gamma
         self.lam = lam
-        self.eps = eps
+        self.clip_ratio = clip_ratio
         self.minibatch_size = minibatch_size
-        self.num_epochs = num_epochs
+        self.epochs = epochs
 
     def select_action(self, state):
-        state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+        state_tensor = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+
         with torch.no_grad():
-            logits, value = self.policy(state)
+            logits, value = self.policy(state_tensor)
             m = Categorical(logits=logits)
             action = m.sample()
             log_prob = m.log_prob(action)
-        
-        return action.item(), log_prob, value.item()
-        
+
+        return int(action.item()), float(log_prob.item()), float(value.item())
+
     def update(self, last_value=0.0):
         states, actions, log_probs, returns, advantages = self.buffer.get(last_value)
 
@@ -129,14 +143,14 @@ class PPOAgent:
         returns = returns.to(self.device)
         advantages = advantages.to(self.device)
 
-        total_loss = 0
+        total_loss = 0.0
         batch_size = states.size(0)
-        num_batches = 0       
+        num_batches = 0
 
-        for i in range(self.num_epochs):
-            indices = torch.randperm(batch_size)
+        for _ in range(self.epochs):
+            indices = torch.randperm(batch_size, device=self.device)
             for start in range(0, batch_size, self.minibatch_size):
-                end = start + self.minibatch_size        
+                end = start + self.minibatch_size
                 idx = indices[start:end]
 
                 batch_states = states[idx]
@@ -150,88 +164,91 @@ class PPOAgent:
                 new_log_probs = m.log_prob(batch_actions)
                 entropy = m.entropy().mean()
 
-                prob_ratio = (new_log_probs - batch_log_probs).exp()
+                prob_ratio = torch.exp(new_log_probs - batch_log_probs)
                 val1 = prob_ratio * batch_advantages
-                val2 = torch.clamp(prob_ratio, 1 - self.eps, 1 + self.eps) * batch_advantages
+                val2 = torch.clamp(
+                    prob_ratio,
+                    1.0 - self.clip_ratio,
+                    1.0 + self.clip_ratio,
+                ) * batch_advantages
                 policy_loss = -torch.min(val1, val2).mean()
-                value_loss = F.mse_loss(values, batch_returns)
 
-                loss = policy_loss + 1.0 * value_loss - 0.01 * entropy
+                value_loss = F.mse_loss(values.squeeze(-1), batch_returns)
 
-                total_loss += loss.item()
-                num_batches += 1
+                loss = policy_loss + value_loss - 0.01 * entropy
 
                 self.optimizer.zero_grad()
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
                 self.optimizer.step()
 
+                total_loss += float(loss.item())
+                num_batches += 1
+
         self.buffer.reset()
 
         return total_loss / max(num_batches, 1)
 
-         
 
 def preprocess_frame(frame):
-    frame = frame[35:195]  
+    frame = frame[35:195]
     frame = frame[::2, ::2]
     frame = frame.mean(axis=2)
     frame = frame.astype(np.float32) / 255.0
     return frame
 
+
 def train(agent, env, num_episodes=1000):
     frame_stack = deque(maxlen=4)
     rewards = []
     losses = []
-    total_steps = 0    
+    total_steps = 0
+    buffer_max = agent.buffer.max_size
 
     for episode in range(num_episodes):
-        steps = 0
-        ep_rewards = []
-
         frame, _ = env.reset()
         frame = preprocess_frame(frame)
-        
+
         frame_stack.clear()
         for _ in range(4):
             frame_stack.append(frame)
-    
+
         state = np.array(frame_stack)
-        ep_return = 0
+        ep_return = 0.0
         ep_len = 0
         done = False
         truncated = False
-    
+
         while not (done or truncated):
             action, log_prob, value = agent.select_action(state)
-        
+
             next_frame, reward, done, truncated, _ = env.step(action)
             next_frame = preprocess_frame(next_frame)
             frame_stack.append(next_frame)
             next_state = np.array(frame_stack)
-        
+
             agent.buffer.store(state, action, log_prob, reward, float(done or truncated), value)
-        
+
             state = next_state
             ep_return += reward
-            steps += 1
-            total_steps += 1
             ep_len += 1
-              
-        ep_rewards.append(ep_return)
-            
-        with torch.no_grad():
-            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(agent.device)
-            logits, last_value = agent.policy(state_tensor)
-            last_value = last_value.squeeze(0).item()
-        
-        loss = agent.update(last_value)
-        losses.append(loss)         
-        print(f"Update: total_steps={total_steps}, loss={loss}")
-        
-        avg_ep_rewards = np.mean(ep_rewards)
-        rewards.append(avg_ep_rewards)
-        print(f"Episode {episode}, Total Reward: {avg_ep_rewards}, Total Steps: {total_steps}")
+            total_steps += 1
+
+            if len(agent.buffer) >= buffer_max:
+                with torch.no_grad():
+                    if done or truncated:
+                        last_value = 0.0
+                    else:
+                        s_tensor = torch.tensor(state, dtype=torch.float32, device=agent.device).unsqueeze(0)
+                        logits, value_tensor = agent.policy(s_tensor)
+                        last_value = float(value_tensor.item())
+
+                loss = agent.update(last_value)
+                losses.append(loss)
+                print(f"Update (buffer full): total_steps={total_steps}, loss={loss:.4f}")
+
+        rewards.append(ep_return)
+        print(f"Episode {episode}, Total Reward: {ep_return}, "f"Length: {ep_len}, Total Steps: {total_steps}")
 
     return rewards, losses
 
@@ -244,7 +261,7 @@ if __name__ == "__main__":
     "cpu"
   )
 
-  seed = 42
+  seed = random.randint(0, 100000)
   random.seed(seed)
   np.random.seed(seed)
   torch.manual_seed(seed)
@@ -252,10 +269,10 @@ if __name__ == "__main__":
   MODEL_PATH = "./model_weights/PPO/pong"
   PLOT_PATH = "./images/PPO"
 
-  state_shape = (4, 80, 80)
-  n_actions = env.action_space.n
+  obs_dim = (4, 80, 80)
+  act_dim = env.action_space.n
 
-  agent = PPOAgent(state_shape, n_actions, device)
+  agent = PPOAgent(obs_dim, act_dim, device)
 
   os.makedirs(MODEL_PATH, exist_ok=True)
   os.makedirs(PLOT_PATH, exist_ok=True)
@@ -265,7 +282,7 @@ if __name__ == "__main__":
     rewards = np.load(f"{MODEL_PATH}/rewards.npy")
     losses = np.load(f"{MODEL_PATH}/losses.npy")
   else:
-    rewards, losses = train(agent, env, num_episodes=5000)
+    rewards, losses = train(agent, env, num_episodes=3000)
     torch.save(agent.policy.state_dict(), f"{MODEL_PATH}/pong_ppo_episode_end.pth")
     np.save(f"{MODEL_PATH}/rewards.npy", np.array(rewards))
     np.save(f"{MODEL_PATH}/losses.npy", np.array(losses))
